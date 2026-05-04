@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Formats.Tar;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -13,10 +14,12 @@ namespace zakoAudioPlayer
     class Program
     {
         static Config? activeConfig = new();
+        static Exception ZakoZako = new Exception();
         static Thread configUpdateThread;
         static Thread mainUpdateThread = new Thread(() => UpdateThread());
         static Thread mainPrintThread = new Thread(() => PrintThread());
         static Thread mainMusicManagerThread = new Thread(() => MusicManagerThread());
+        static Thread mainKeyListenerThread = new Thread(() => KeyListener());
         static string? Playing;
         static int MaximumWidth = 80;
         static string Page = "Home";
@@ -80,7 +83,7 @@ namespace zakoAudioPlayer
 
         static class packageInfo
         {
-            public static readonly Version version = new("2026.1.0");
+            public static readonly Version version = new("2026.1.2");
             public static readonly string description =
                 @"It's just a media player
                 a light,fast media player
@@ -206,7 +209,7 @@ namespace zakoAudioPlayer
             mainUpdateThread.Start();
             mainPrintThread.Start();
             mainMusicManagerThread.Start();
-            return;
+            mainKeyListenerThread.Start();
         }
 
         static void Help()
@@ -326,19 +329,44 @@ namespace zakoAudioPlayer
                 string t2 = new('=', mid - (t1.Length / 2));
                 Console.WriteLine($"{t2}{t1}{t2}");
                 Console.ResetColor();
-                switch (Page)
+                if (BufferSize[0] > 20)
                 {
-                    case "Home":
-                        HomePage();
-                        break;
-                    case "Volume":
-                        VolumePage();
-                        break;
-                    case "SelectSpeaker":
-                        SelectSpeakerPage();
-                        break;
+                    var s = Task.Run(() => renderPage());
+                    var sw = new Stopwatch();
+                    sw.Start();
+                    while (true)
+                    {
+                        if (sw.ElapsedMilliseconds >= 100 || s.IsCompleted)
+                        {
+                            break;
+                        }
+                        Thread.Sleep(5);
+                    }
+                    sw.Stop();
+                    sw.Reset();
+                }
+                else
+                {
+                    Console.WriteLine("要被挤死了喵");
+                    Console.WriteLine("(`д´)");
                 }
                 Thread.Sleep(10);
+            }
+        }
+
+        static void renderPage()
+        {
+            switch (Page)
+            {
+                case "Home":
+                    HomePage();
+                    break;
+                case "Volume":
+                    VolumePage();
+                    break;
+                case "SelectSpeaker":
+                    SelectSpeakerPage();
+                    break;
             }
         }
 
@@ -353,7 +381,7 @@ namespace zakoAudioPlayer
 
         static class HomePageData
         {
-            public static bool keyPress = false;
+            public static ConsoleKey keyPress = ConsoleKey.VolumeMute;
         }
 
         static Action HomePage = () =>
@@ -421,10 +449,10 @@ namespace zakoAudioPlayer
                 $"[F6]Loop Mode[{(activeConfig.playMode != 1 ? "Enabled" : "Disabled")}]",
                 $"[F7]Random Mode[{(activeConfig.random ? "Enabled" : "Disabled")}]",
             ]);
-            if (Console.KeyAvailable != HomePageData.keyPress)
+            if (key != HomePageData.keyPress)
             {
-                HomePageData.keyPress = Console.KeyAvailable;
-                switch (Console.ReadKey().Key)
+                HomePageData.keyPress = (ConsoleKey)key;
+                switch (key)
                 {
                     case (ConsoleKey.Spacebar):
                         try
@@ -540,7 +568,7 @@ namespace zakoAudioPlayer
 
         static class VolumePageData
         {
-            public static bool KeyPress = false;
+            public static ConsoleKey KeyPress = ConsoleKey.VolumeMute;
         }
 
         static Action VolumePage = () =>
@@ -579,10 +607,10 @@ namespace zakoAudioPlayer
                 "[UpArrow]Add Volume(*10)",
                 "[S]Choose a speaker",
             ]);
-            if (VolumePageData.KeyPress != Console.KeyAvailable)
+            if (VolumePageData.KeyPress != key)
             {
-                VolumePageData.KeyPress = Console.KeyAvailable;
-                switch (Console.ReadKey().Key)
+                VolumePageData.KeyPress = (ConsoleKey)key;
+                switch (key)
                 {
                     case (ConsoleKey.Escape):
                         Page = "Home";
@@ -617,7 +645,7 @@ namespace zakoAudioPlayer
 
         static class SelectSpeakerPageData
         {
-            public static bool KeyPress = false;
+            public static ConsoleKey KeyPress = ConsoleKey.VolumeMute;
             public static int Line = 5;
             public static List<DeviceInfo>? DevList;
             public static List<string>? DevNameList;
@@ -700,10 +728,10 @@ namespace zakoAudioPlayer
                 "[Space]Select",
                 "[R]Reload",
             ]);
-            if (SelectSpeakerPageData.KeyPress != Console.KeyAvailable)
+            if (SelectSpeakerPageData.KeyPress != (ConsoleKey)key)
             {
-                SelectSpeakerPageData.KeyPress = Console.KeyAvailable;
-                switch (Console.ReadKey().Key)
+                SelectSpeakerPageData.KeyPress = (ConsoleKey)key;
+                switch ((ConsoleKey)key)
                 {
                     case (ConsoleKey.Escape):
                         Page = "Volume";
@@ -811,5 +839,14 @@ namespace zakoAudioPlayer
             Console.ResetColor();
             Console.Write('\n');
         };
+        static ConsoleKey? key = null;
+
+        static void KeyListener()
+        {
+            while (true)
+            {
+                key = Console.ReadKey().Key;
+            }
+        }
     }
 }
