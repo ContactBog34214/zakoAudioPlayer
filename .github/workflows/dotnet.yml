@@ -1,28 +1,116 @@
-# This workflow will build a .NET project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
-
-name: .NET
+name: Build and Release
 
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
-
+    name: Build on ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            artifact_name: zakoAudioPlayer-win-x64
+            compress_ext: zip
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact_name: zakoAudioPlayer-linux-x64
+            compress_ext: tar.gz
+          - os: macos-latest
+            rid: osx-x64
+            artifact_name: zakoAudioPlayer-osx-x64
+            compress_ext: tar.gz
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v4
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 10.0.x
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Build
-      run: dotnet build --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # 进入项目文件夹（如果你的 .csproj 在子目录中）
+      - name: Change to project directory
+        run: |
+          if (Test-Path "zakoAudioPlayer/zakoAudioPlayer.csproj") {
+            cd zakoAudioPlayer
+          } elseif (Test-Path "zakoAudioPlayer.csproj") {
+            cd .
+          } else {
+            Write-Error "Cannot find .csproj file"
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build (compile only)
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish self-contained (folder)
+        run: |
+          dotnet publish \
+            --configuration Release \
+            --runtime ${{ matrix.rid }} \
+            --self-contained true \
+            --output ./publish \
+            --no-build \
+            -p:DebugType=none \
+            -p:DebugSymbols=false
+
+      - name: List publish output (debug)
+        run: dir ./publish
+        shell: pwsh
+
+      - name: Compress (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dest = Join-Path "${{ runner.temp }}" "${{ matrix.artifact_name }}.zip"
+          Compress-Archive -Path ./publish/* -DestinationPath $dest -Force
+
+      - name: Compress (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          dest="${{ runner.temp }}/${{ matrix.artifact_name }}.tar.gz"
+          cd ./publish && tar -czf "$dest" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ runner.temp }}/${{ matrix.artifact_name }}.${{ matrix.compress_ext }}
+
+  release:
+    name: Create Release and Upload Assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Display artifacts
+        run: ls -R ./artifacts
+
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous-${{ github.run_number }}
+          name: "Continuous Build #${{ github.run_number }}"
+          body: "Automated build from commit ${{ github.sha }}"
+          draft: false
+          prerelease: true
+          files: |
+            ./artifacts/**/*.zip
+            ./artifacts/**/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
