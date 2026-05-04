@@ -3,13 +3,12 @@ name: Build and Release
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:   # 支持手动触发
+  workflow_dispatch:
 
 permissions:
-  contents: write      # 允许创建 Release 和上传附件
+  contents: write
 
 jobs:
-  # ---------- 1. 构建并打包多平台产物 ----------
   build:
     name: Build on ${{ matrix.os }}
     strategy:
@@ -18,28 +17,15 @@ jobs:
           - os: windows-latest
             rid: win-x64
             artifact_name: zakoAudioPlayer-win-x64
-            compress_cmd: |
-              $temp = "${{ runner.temp }}"
-              $dest = Join-Path $temp "${{ matrix.artifact_name }}.zip"
-              Compress-Archive -Path ./publish/* -DestinationPath $dest -Force
             compress_ext: zip
-
           - os: ubuntu-latest
             rid: linux-x64
             artifact_name: zakoAudioPlayer-linux-x64
-            compress_cmd: |
-              cd ./publish
-              tar -czf "${{ runner.temp }}/${{ matrix.artifact_name }}.tar.gz" .
             compress_ext: tar.gz
-
           - os: macos-latest
             rid: osx-x64
             artifact_name: zakoAudioPlayer-osx-x64
-            compress_cmd: |
-              cd ./publish
-              tar -czf "${{ runner.temp }}/${{ matrix.artifact_name }}.tar.gz" .
             compress_ext: tar.gz
-
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +33,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'     # 根据你的目标 .NET 版本调整（支持 6.0/8.0/9.0）
+          dotnet-version: '8.0.x'
 
       - name: Restore dependencies
         run: dotnet restore
@@ -64,24 +50,27 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false
 
-      - name: Compress artifacts (Windows)
+      - name: Compress (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ${{ matrix.compress_cmd }}
+        run: |
+          $dest = Join-Path "${{ runner.temp }}" "${{ matrix.artifact_name }}.zip"
+          Compress-Archive -Path ./publish/* -DestinationPath $dest -Force
 
-      - name: Compress artifacts (Unix)
+      - name: Compress (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: ${{ matrix.compress_cmd }}
+        run: |
+          dest="${{ runner.temp }}/${{ matrix.artifact_name }}.tar.gz"
+          cd ./publish && tar -czf "$dest" .
 
-      - name: Upload compressed artifact to workflow
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ runner.temp }}/${{ matrix.artifact_name }}.${{ matrix.compress_ext }}
           if-no-files-found: error
 
-  # ---------- 2. 创建 Release 并上传所有压缩包 ----------
   release:
     name: Create Release and Upload Assets
     needs: build
@@ -101,18 +90,12 @@ jobs:
           tag_name: continuous-${{ github.run_number }}
           name: "Continuous Build #${{ github.run_number }}"
           body: |
-            🚀 自动构建于 [${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
-            包含以下平台的可执行文件：
-            - Windows x64（zip）
-            - Linux x64（tar.gz）
-            - macOS x64（tar.gz）
+            🚀 自动构建于 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           draft: false
-          prerelease: true        # 设为预发布，避免通知所有用户；可改为 false
-          files: ./artifacts/**/*.zip
-          # 如果还需要上传 tar.gz 文件，取消下面两行的注释，并注释上一行
-          # files: |
-          #   ./artifacts/**/*.zip
-          #   ./artifacts/**/*.tar.gz
+          prerelease: true
+          # 上传所有 zip 文件（Windows）和 tar.gz 文件（Linux/macOS）
+          files: |
+            ./artifacts/**/*.zip
+            ./artifacts/**/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
