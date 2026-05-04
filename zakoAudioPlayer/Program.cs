@@ -354,6 +354,7 @@ namespace zakoAudioPlayer
                 string t2 = new('=', mid - (t1.Length / 2));
                 string t3 = new('=', (int)(BufferSize[0] - t1.Length - t2.Length));
                 Console.WriteLine($"{t2}{t1}{t3}");
+                HomePageData.usedLine = 4;
                 Console.ResetColor();
                 if (BufferSize[0] > 20)
                 {
@@ -408,6 +409,7 @@ namespace zakoAudioPlayer
         static class HomePageData
         {
             public static ConsoleKey keyPress = ConsoleKey.VolumeMute;
+            public static int usedLine = 0;
         }
 
         static Action HomePage = () =>
@@ -431,6 +433,7 @@ namespace zakoAudioPlayer
             Console.Write(t_1);
             Console.ResetColor();
             Console.WriteLine(t_2);
+            HomePageData.usedLine++;
             string t1 = $"By {metaData[1]}";
             string t2 = $"From {metaData[2]}";
             int t3 = (int)((BufferSize[0] - 2) / 2);
@@ -442,10 +445,12 @@ namespace zakoAudioPlayer
                 Console.Write(t1);
                 Console.ResetColor();
                 Console.Write('\n');
+                HomePageData.usedLine++;
                 Console.BackgroundColor = ConsoleColor.Blue;
                 Console.Write(t2);
                 Console.ResetColor();
                 Console.Write('\n');
+                HomePageData.usedLine++;
             }
             else
             {
@@ -455,6 +460,7 @@ namespace zakoAudioPlayer
                 Console.Write($"{new(' ', t3 - t2.Length)}{t2}");
                 Console.ResetColor();
                 Console.WriteLine();
+                HomePageData.usedLine++;
             }
             Console.ResetColor();
             playingBar();
@@ -797,8 +803,22 @@ namespace zakoAudioPlayer
         {
             int length = (int)BufferSize[0];
             string title = "Music List";
-            int height = (int)11;
-            int mid = (int)height / 2;
+            int height = (int)BufferSize[1] - HomePageData.usedLine - 1;
+            int offset = (int)Math.Ceiling((double)height / 2);
+            if (index - offset < 0)
+            {
+                offset = index;
+            }
+            else if (index > md.Count + offset - height)
+            {
+                /*
+                 *已知md.Count,offset,height,index
+                 *列出下列方程
+                 *index-md.Count+height>offset
+                 *offset+index+height-1<md.Count
+                 */
+                offset = index+height-md.Count;
+            }
             int t1 = (int)(length - title.Length) / 2;
             int t2 = (int)length - title.Length - t1;
             string t3 = new('~', t1);
@@ -810,14 +830,16 @@ namespace zakoAudioPlayer
             Console.ResetColor();
             Console.Write(t4);
             Console.Write('\n');
-            int i = -mid;
-            for (int j = 0; j < 11; j++)
+            HomePageData.usedLine++;
+            int i = -offset;
+            for (int j = 0; j < height; j++)
             {
                 int hit = index + j + i;
                 if (hit < 0 || hit >= md.Count)
                 {
                     Console.ResetColor();
                     Console.Write('\n');
+                    HomePageData.usedLine++;
                     continue;
                 }
                 string[] target = md[hit];
@@ -850,7 +872,9 @@ namespace zakoAudioPlayer
                 Console.Write($"{new string(' ', t21 - t31.Length)}{t31} ");
                 Console.Write($"{new string(' ', t22 - t32.Length)}{t32} ");
                 Console.Write($"{new string(' ', t23 - t33.Length)}{t33} ");
+                Console.ResetColor();
                 Console.Write('\n');
+                HomePageData.usedLine++;
             }
         };
         static Action playingBar = () =>
@@ -872,10 +896,12 @@ namespace zakoAudioPlayer
                 Console.Write(nt);
                 Console.ResetColor();
                 Console.Write('\n');
+                HomePageData.usedLine++;
                 Console.BackgroundColor = ConsoleColor.Magenta;
                 Console.Write(ft);
                 Console.ResetColor();
                 Console.Write('\n');
+                HomePageData.usedLine++;
             }
             else
             {
@@ -888,6 +914,7 @@ namespace zakoAudioPlayer
                 Console.Write(ft);
                 Console.ResetColor();
                 Console.Write('\n');
+                HomePageData.usedLine++;
             }
         };
         static Action<List<string>> actionBar = (List<string> arg) =>
@@ -900,6 +927,7 @@ namespace zakoAudioPlayer
                 {
                     Console.ResetColor();
                     Console.Write('\n');
+                    HomePageData.usedLine++;
                     continue;
                 }
                 if (tmp == 0 || i.Length + tmp + 2 <= length)
@@ -916,6 +944,7 @@ namespace zakoAudioPlayer
                     Console.Write(new string(' ', length - tmp));
                     Console.ResetColor();
                     Console.Write('\n');
+                    HomePageData.usedLine++;
                     Console.BackgroundColor = ConsoleColor.DarkGreen;
                     Console.Write(i);
                     Console.BackgroundColor = ConsoleColor.Black;
@@ -924,6 +953,7 @@ namespace zakoAudioPlayer
             }
             Console.ResetColor();
             Console.Write('\n');
+            HomePageData.usedLine++;
         };
         static ConsoleKey? key = null;
 
