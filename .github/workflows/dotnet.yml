@@ -35,18 +35,39 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # 进入项目文件夹（如果你的 .csproj 在子目录中）
+      - name: Change to project directory
+        run: |
+          if (Test-Path "zakoAudioPlayer/zakoAudioPlayer.csproj") {
+            cd zakoAudioPlayer
+          } elseif (Test-Path "zakoAudioPlayer.csproj") {
+            cd .
+          } else {
+            Write-Error "Cannot find .csproj file"
+            exit 1
+          }
+        shell: pwsh
+
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Publish self-contained (no single-file)
+      - name: Build (compile only)
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish self-contained (folder)
         run: |
           dotnet publish \
             --configuration Release \
             --runtime ${{ matrix.rid }} \
             --self-contained true \
             --output ./publish \
+            --no-build \
             -p:DebugType=none \
             -p:DebugSymbols=false
+
+      - name: List publish output (debug)
+        run: dir ./publish
+        shell: pwsh
 
       - name: Compress (Windows)
         if: runner.os == 'Windows'
@@ -67,3 +88,29 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ runner.temp }}/${{ matrix.artifact_name }}.${{ matrix.compress_ext }}
+
+  release:
+    name: Create Release and Upload Assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Display artifacts
+        run: ls -R ./artifacts
+
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous-${{ github.run_number }}
+          name: "Continuous Build #${{ github.run_number }}"
+          body: "Automated build from commit ${{ github.sha }}"
+          draft: false
+          prerelease: true
+          files: |
+            ./artifacts/**/*.zip
+            ./artifacts/**/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
