@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using Line.Framework.Audio;
 using ManagedBass;
+using TagLib.Flac;
 
 #nullable enable
 
@@ -28,6 +29,7 @@ namespace zakoAudioPlayer
         static int index = 0;
         static string[] metaData = ["Title", "artist", "collection"];
         static double fullTime = 0;
+        static List<string[]> md = [];
         static Track? MainTrack;
 
         public static T DeepCopy<T>(T obj)
@@ -45,7 +47,7 @@ namespace zakoAudioPlayer
                 if (!activeConfig.Equals(lastConfig))
                 {
                     lastConfig = DeepCopy<Config?>(activeConfig);
-                    File.WriteAllText(path, JsonSerializer.Serialize(activeConfig));
+                    System.IO.File.WriteAllText(path, JsonSerializer.Serialize(activeConfig));
                 }
             }
         }
@@ -61,8 +63,15 @@ namespace zakoAudioPlayer
                     string b = path.Split('.')[path.Split('.').Length - 1];
                     if (b == "txt")
                     {
-                        string readIn = File.ReadAllText(path);
+                        string readIn = System.IO.File.ReadAllText(path);
                         music = readIn.Split('\n').ToList();
+                        for (int i = music.Count - 1; i >= 0; i--)
+                        {
+                            if (music[i] == "")
+                            {
+                                music.RemoveAt(i);
+                            }
+                        }
                         activeConfig.targetFile = path;
                     }
                     else
@@ -81,9 +90,24 @@ namespace zakoAudioPlayer
             }
         }
 
+        static void LoadMusic()
+        {
+            try
+            {
+                List<string[]> tmp = [];
+                foreach (string i in music)
+                {
+                    var tmp2 = audio.GetMetadata(i);
+                    tmp.Add([tmp2.title, tmp2.artist, tmp2.album]);
+                }
+                md = tmp;
+            }
+            catch { }
+        }
+
         static class packageInfo
         {
-            public static readonly Version version = new("2026.1.2");
+            public static readonly Version version = new("2026.1.3");
             public static readonly string description =
                 @"It's just a media player
                 a light,fast media player
@@ -111,7 +135,7 @@ namespace zakoAudioPlayer
         {
             try
             {
-                string tmp = File.ReadAllText(file);
+                string tmp = System.IO.File.ReadAllText(file);
                 var options = new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true,
@@ -133,7 +157,7 @@ namespace zakoAudioPlayer
             }
             catch
             {
-                var F = File.Create(file);
+                var F = System.IO.File.Create(file);
                 F.Dispose();
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 {
@@ -143,7 +167,7 @@ namespace zakoAudioPlayer
                 {
                     activeConfig.speaker = "";
                 }
-                File.WriteAllText(file, JsonSerializer.Serialize(activeConfig));
+                System.IO.File.WriteAllText(file, JsonSerializer.Serialize(activeConfig));
             }
         }
 
@@ -205,6 +229,7 @@ namespace zakoAudioPlayer
             {
                 LoadFile(loadArg);
             }
+            LoadMusic();
             configUpdateThread.Start();
             mainUpdateThread.Start();
             mainPrintThread.Start();
@@ -327,7 +352,8 @@ namespace zakoAudioPlayer
                 }
                 t1 = $" zakoAudioPlayer - {Page} ".Substring(0, targetLength);
                 string t2 = new('=', mid - (t1.Length / 2));
-                Console.WriteLine($"{t2}{t1}{t2}");
+                string t3 = new('=', (int)(BufferSize[0] - t1.Length - t2.Length));
+                Console.WriteLine($"{t2}{t1}{t3}");
                 Console.ResetColor();
                 if (BufferSize[0] > 20)
                 {
@@ -408,7 +434,7 @@ namespace zakoAudioPlayer
             string t1 = $"By {metaData[1]}";
             string t2 = $"From {metaData[2]}";
             int t3 = (int)((BufferSize[0] - 2) / 2);
-            int t4 = (int)(BufferSize[0] - 2 * t3);
+            int t4 = (int)(BufferSize[0] - 2 * t3) - 1;
             string apart = new(' ', t4);
             if (t1.Length > t3 || t2.Length > t3)
             {
@@ -449,6 +475,7 @@ namespace zakoAudioPlayer
                 $"[F6]Loop Mode[{(activeConfig.playMode != 1 ? "Enabled" : "Disabled")}]",
                 $"[F7]Random Mode[{(activeConfig.random ? "Enabled" : "Disabled")}]",
             ]);
+            DrawMusicList();
             if (key != HomePageData.keyPress)
             {
                 HomePageData.keyPress = (ConsoleKey)key;
@@ -766,7 +793,66 @@ namespace zakoAudioPlayer
                 SelectSpeakerPageData.select = SelectSpeakerPageData.DevNameList.Count - 1;
             }
         };
-
+        static Action DrawMusicList = () =>
+        {
+            int length = (int)BufferSize[0];
+            string title = "Music List";
+            int height = (int)11;
+            int mid = (int)height / 2;
+            int t1 = (int)(length - title.Length) / 2;
+            int t2 = (int)length - title.Length - t1;
+            string t3 = new('~', t1);
+            string t4 = new('~', t2);
+            Console.ResetColor();
+            Console.Write(t3);
+            Console.BackgroundColor = ConsoleColor.Yellow;
+            Console.Write(title);
+            Console.ResetColor();
+            Console.Write(t4);
+            Console.Write('\n');
+            int i = -mid;
+            for (int j = 0; j < 11; j++)
+            {
+                int hit = index + j + i;
+                if (hit < 0 || hit >= md.Count)
+                {
+                    Console.ResetColor();
+                    Console.Write('\n');
+                    continue;
+                }
+                string[] target = md[hit];
+                string t11 = $"{new string(' ', 4 - ((hit + 1).ToString().Length))}{hit + 1}.";
+                int t20 = length - t11.Length - 3;
+                int t21 = t20 / 3;
+                int t22 = t21;
+                int t23 = t20 - t21 - t22;
+                string t31 = target[0];
+                string t32 = target[1];
+                string t33 = target[2];
+                if (t31.Length > t21)
+                {
+                    t31 = $"{t31.Substring(0, t21 - 3)}...";
+                }
+                if (t32.Length > t22)
+                {
+                    t32 = $"{t31.Substring(0, t22 - 3)}...";
+                }
+                if (t33.Length > t23)
+                {
+                    t33 = $"{t31.Substring(0, t23 - 3)}...";
+                }
+                Console.BackgroundColor = ConsoleColor.Black;
+                if (hit == index)
+                {
+                    Console.BackgroundColor = ConsoleColor.DarkGreen;
+                }
+                Console.Write(t11);
+                Console.Write($"{new string(' ', t21 - t31.Length)}{t31}");
+                Console.Write($"{new string(' ', t22 - t32.Length)}{t32}");
+                Console.Write($"{new string(' ', t23 - t33.Length)}{t33}");
+                Console.Write('\n');
+            }
+        };
         static Action playingBar = () =>
         {
             double now = 0;
@@ -793,7 +879,7 @@ namespace zakoAudioPlayer
             }
             else
             {
-                int progressBarLength = (int)(BufferSize[0] - ft.Length - nt.Length + 1);
+                int progressBarLength = (int)(BufferSize[0] - ft.Length - nt.Length);
                 int played = (int)(progressBarLength * (now / fullTime));
                 Console.ResetColor();
                 Console.Write(nt);
