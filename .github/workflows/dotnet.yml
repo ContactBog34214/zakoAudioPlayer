@@ -1,28 +1,118 @@
-# This workflow will build a .NET project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
-
-name: .NET
+name: Build and Release
 
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:   # 支持手动触发
+
+permissions:
+  contents: write      # 允许创建 Release 和上传附件
 
 jobs:
+  # ---------- 1. 构建并打包多平台产物 ----------
   build:
+    name: Build on ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            artifact_name: zakoAudioPlayer-win-x64
+            compress_cmd: |
+              $temp = "${{ runner.temp }}"
+              $dest = Join-Path $temp "${{ matrix.artifact_name }}.zip"
+              Compress-Archive -Path ./publish/* -DestinationPath $dest -Force
+            compress_ext: zip
 
-    runs-on: ubuntu-latest
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact_name: zakoAudioPlayer-linux-x64
+            compress_cmd: |
+              cd ./publish
+              tar -czf "${{ runner.temp }}/${{ matrix.artifact_name }}.tar.gz" .
+            compress_ext: tar.gz
 
+          - os: macos-latest
+            rid: osx-x64
+            artifact_name: zakoAudioPlayer-osx-x64
+            compress_cmd: |
+              cd ./publish
+              tar -czf "${{ runner.temp }}/${{ matrix.artifact_name }}.tar.gz" .
+            compress_ext: tar.gz
+
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v4
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 10.0.x
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Build
-      run: dotnet build --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'     # 根据你的目标 .NET 版本调整（支持 6.0/8.0/9.0）
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Publish self-contained executable
+        run: |
+          dotnet publish \
+            --configuration Release \
+            --runtime ${{ matrix.rid }} \
+            --self-contained true \
+            --output ./publish \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false
+
+      - name: Compress artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ${{ matrix.compress_cmd }}
+
+      - name: Compress artifacts (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${{ matrix.compress_cmd }}
+
+      - name: Upload compressed artifact to workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ runner.temp }}/${{ matrix.artifact_name }}.${{ matrix.compress_ext }}
+          if-no-files-found: error
+
+  # ---------- 2. 创建 Release 并上传所有压缩包 ----------
+  release:
+    name: Create Release and Upload Assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R ./artifacts
+
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous-${{ github.run_number }}
+          name: "Continuous Build #${{ github.run_number }}"
+          body: |
+            🚀 自动构建于 [${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            包含以下平台的可执行文件：
+            - Windows x64（zip）
+            - Linux x64（tar.gz）
+            - macOS x64（tar.gz）
+          draft: false
+          prerelease: true        # 设为预发布，避免通知所有用户；可改为 false
+          files: ./artifacts/**/*.zip
+          # 如果还需要上传 tar.gz 文件，取消下面两行的注释，并注释上一行
+          # files: |
+          #   ./artifacts/**/*.zip
+          #   ./artifacts/**/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
