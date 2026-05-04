@@ -21,7 +21,7 @@ namespace zakoAudioPlayer
         static Thread mainMusicManagerThread = new Thread(() => MusicManagerThread());
         static Thread mainKeyListenerThread = new Thread(() => KeyListener());
         static string? Playing;
-        static int MaximumWidth = 80;
+        static int MaximumWidth = 400;
         static string Page = "Home";
         static List<string> music = ["No Playing"];
         static AudioManager audio = new AudioManager();
@@ -846,6 +846,8 @@ namespace zakoAudioPlayer
             while (true)
             {
                 key = Console.ReadKey().Key;
+                Thread.Sleep(20);
+                key = ConsoleKey.Applications;
             }
         }
     }
