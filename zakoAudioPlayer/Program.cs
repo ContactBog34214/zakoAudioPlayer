@@ -847,9 +847,9 @@ namespace zakoAudioPlayer
                     Console.BackgroundColor = ConsoleColor.DarkGreen;
                 }
                 Console.Write(t11);
-                Console.Write($"{new string(' ', t21 - t31.Length)}{t31}");
-                Console.Write($"{new string(' ', t22 - t32.Length)}{t32}");
-                Console.Write($"{new string(' ', t23 - t33.Length)}{t33}");
+                Console.Write($"{new string(' ', t21 - t31.Length)}{t31} ");
+                Console.Write($"{new string(' ', t22 - t32.Length)}{t32} ");
+                Console.Write($"{new string(' ', t23 - t33.Length)}{t33} ");
                 Console.Write('\n');
             }
         };
