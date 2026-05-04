@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Formats.Tar;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Line.Framework.Audio;
 using ManagedBass;
@@ -14,6 +15,84 @@ namespace zakoAudioPlayer
 {
     class Program
     {
+        /// <summary>
+        /// 获取字符串的显示宽度（全角2，半角1）
+        /// </summary>
+        static int GetDisplayWidth(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return 0;
+            int width = 0;
+            foreach (char c in text)
+            {
+                if (IsFullWidth(c))
+                    width += 2;
+                else
+                    width += 1;
+            }
+            return width;
+        }
+
+        /// <summary>
+        /// 判断字符是否为全角（常用 CJK 范围）
+        /// </summary>
+        static bool IsFullWidth(char c)
+        {
+            return (c >= 0x4E00 && c <= 0x9FFF)
+                || (c >= 0x3040 && c <= 0x30FF)
+                || (c >= 0x3400 && c <= 0x4DBF)
+                || (c >= 0x20000 && c <= 0x2A6DF)
+                || (c >= 0xFF00 && c <= 0xFFEF)
+                || (c >= 0x2E80 && c <= 0x2EFF)
+                || (c >= 0x3000 && c <= 0x303F)
+                || (c >= 0x31C0 && c <= 0x31EF)
+                || (c >= 0x3200 && c <= 0x32FF)
+                || (c >= 0x3300 && c <= 0x33FF)
+                || (c >= 0xF900 && c <= 0xFAFF)
+                || (c >= 0xFE30 && c <= 0xFE4F);
+        }
+
+        /// <summary>
+        /// 按显示宽度右侧填充空格
+        /// </summary>
+        static string PadRightToWidth(string text, int targetWidth)
+        {
+            int current = GetDisplayWidth(text);
+            if (current >= targetWidth)
+                return text;
+            return text + new string(' ', targetWidth - current);
+        }
+
+        /// <summary>
+        /// 按显示宽度截断文本，末尾加省略号
+        /// </summary>
+        static string TruncateToWidth(string text, int maxWidth)
+        {
+            if (string.IsNullOrEmpty(text) || maxWidth <= 0)
+                return "";
+            if (GetDisplayWidth(text) <= maxWidth)
+                return text;
+
+            int width = 0;
+            for (int i = 0; i < text.Length; i++)
+            {
+                int charWidth = IsFullWidth(text[i]) ? 2 : 1;
+                if (width + charWidth > maxWidth)
+                {
+                    // 保留前面的字符，后面加省略号（省略号占1个宽度）
+                    if (i < 1)
+                        return "…";
+                    string truncated = text.Substring(0, i - 1);
+                    // 确保加上省略号后不超过 maxWidth
+                    while (GetDisplayWidth(truncated) + 1 > maxWidth && truncated.Length > 0)
+                        truncated = truncated.Substring(0, truncated.Length - 1);
+                    return truncated + "…";
+                }
+                width += charWidth;
+            }
+            return text;
+        }
+
         static Config? activeConfig = new();
         static Exception ZakoZako = new Exception();
         static Thread configUpdateThread;
@@ -32,10 +111,29 @@ namespace zakoAudioPlayer
         static List<string[]> md = [];
         static Track? MainTrack;
 
+        static double audioPositionAtNext = 0;
+
         public static T DeepCopy<T>(T obj)
         {
             string json = JsonSerializer.Serialize(obj);
             return JsonSerializer.Deserialize<T>(json);
+        }
+
+        static void UpdateFileNow(string path)
+        {
+            if (activeConfig.saveAudioProgress)
+            {
+                try
+                {
+                    activeConfig.Progress = MainTrack.CurrentPosition;
+                }
+                catch { }
+            }
+            else
+            {
+                activeConfig.Progress = 0;
+            }
+            System.IO.File.WriteAllText(path, JsonSerializer.Serialize(activeConfig));
         }
 
         static void UpdateFile(string path)
@@ -47,7 +145,7 @@ namespace zakoAudioPlayer
                 if (!activeConfig.Equals(lastConfig))
                 {
                     lastConfig = DeepCopy<Config?>(activeConfig);
-                    System.IO.File.WriteAllText(path, JsonSerializer.Serialize(activeConfig));
+                    UpdateFileNow(path);
                 }
             }
         }
@@ -72,6 +170,7 @@ namespace zakoAudioPlayer
                                 music.RemoveAt(i);
                             }
                         }
+                        index = activeConfig.index;
                         activeConfig.targetFile = path;
                     }
                     else
@@ -100,6 +199,7 @@ namespace zakoAudioPlayer
                     var tmp2 = audio.GetMetadata(i);
                     tmp.Add([tmp2.title, tmp2.artist, tmp2.album]);
                 }
+                index = activeConfig.index;
                 md = tmp;
             }
             catch { }
@@ -107,7 +207,7 @@ namespace zakoAudioPlayer
 
         static class packageInfo
         {
-            public static readonly Version version = new("2026.1.3");
+            public static readonly Version version = new("2026.2.0");
             public static readonly string description =
                 @"It's just a media player
                 a light,fast media player
@@ -128,8 +228,12 @@ namespace zakoAudioPlayer
             /*
              *增量的
              */
-            public static bool autoPlay = false;
+            public bool autoPlay { get; set; } = false;
+            public bool saveAudioProgress { get; set; } = true;
+            public double Progress { get; set; } = 0;
         }
+
+        static string targetConfigPath = "";
 
         static void LoadConfig(string file)
         {
@@ -167,13 +271,13 @@ namespace zakoAudioPlayer
                 {
                     activeConfig.speaker = "";
                 }
-                System.IO.File.WriteAllText(file, JsonSerializer.Serialize(activeConfig));
+                UpdateFileNow(file);
             }
         }
 
         static void Main(string[] arg)
         {
-            string loadArg = "";
+            string loadArg = null;
             if (arg.Length != 0)
             {
                 switch (arg[0])
@@ -205,13 +309,18 @@ namespace zakoAudioPlayer
             path = $"{path}/.local/share";
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                path = "$/HOME/AppData/Local";
+                path = $"{path}/AppData/Local";
             }
             path = $"{path}/zakoAudioPlayer";
             if (!Directory.Exists(path))
                 Directory.CreateDirectory(path);
-            LoadConfig($"{path}/config.json");
-            index = activeConfig.index;
+            targetConfigPath = $"{path}/config.json";
+            LoadConfig(targetConfigPath);
+            if (activeConfig.saveAudioProgress && loadArg == null)
+            {
+                audioPositionAtNext = activeConfig.Progress;
+            }
+            startNow = (activeConfig.autoPlay || loadArg != null);
             if (activeConfig.volume > 1)
             {
                 activeConfig.volume = 1;
@@ -221,7 +330,7 @@ namespace zakoAudioPlayer
                 activeConfig.volume = 0;
             }
             configUpdateThread = new Thread(() => UpdateFile($"{path}/config.json"));
-            if (loadArg == "")
+            if (loadArg == null)
             {
                 LoadFile(activeConfig.targetFile);
             }
@@ -231,10 +340,34 @@ namespace zakoAudioPlayer
             }
             LoadMusic();
             configUpdateThread.Start();
-            mainUpdateThread.Start();
             mainPrintThread.Start();
             mainMusicManagerThread.Start();
             mainKeyListenerThread.Start();
+            index = activeConfig.index;
+            mainUpdateThread.Start();
+            if (
+                RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+                || RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+            )
+            {
+                PosixSignalRegistration.Create(PosixSignal.SIGINT, HandlePosixSignal); // Ctrl+C
+                PosixSignalRegistration.Create(PosixSignal.SIGTERM, HandlePosixSignal); // kill 命令的默认信号
+            }
+        }
+
+        private static void HandlePosixSignal(PosixSignalContext context)
+        {
+            context.Cancel = true; // 避免进程被立即终止
+            try
+            {
+                audio.UnloadTrack("Main");
+            }
+            catch { }
+            try
+            {
+                UpdateFileNow(targetConfigPath);
+            }
+            catch { }
         }
 
         static void Help()
@@ -252,6 +385,10 @@ namespace zakoAudioPlayer
             //activeConfig.speaker = "PipeWire Sound Server";
             while (true)
             {
+                if (index != activeConfig.index)
+                {
+                    activeConfig.index = index;
+                }
                 if (lastSpeaker != activeConfig.speaker)
                 {
                     lastSpeaker = activeConfig.speaker;
@@ -261,8 +398,22 @@ namespace zakoAudioPlayer
                     {
                         if (devs[i].Name == activeConfig.speaker)
                         {
+                            bool tmp1 = false;
+                            double tmp2 = 0;
+                            try
+                            {
+                                tmp1 = MainTrack.IsPlaying;
+                                tmp2 = MainTrack.CurrentPosition;
+                            }
+                            catch
+                            {
+                                tmp1 = activeConfig.autoPlay;
+                                tmp2 = activeConfig.saveAudioProgress ? activeConfig.Progress : 0;
+                            }
                             audio.SwitchDevice(i);
                             lastPlaying = "";
+                            startNow = tmp1;
+                            audioPositionAtNext = tmp2;
                         }
                     }
                 }
@@ -272,7 +423,7 @@ namespace zakoAudioPlayer
                 }
                 if (index < 0)
                 {
-                    index = music.Count-1;
+                    index = music.Count - 1;
                 }
                 if (music.Count != 0)
                 {
@@ -301,8 +452,23 @@ namespace zakoAudioPlayer
                         metaData[2] = _metadata.album;
                         if (startNow)
                         {
-                            MainTrack.Play();
+                            try
+                            {
+                                MainTrack.Play();
+                            }
+                            catch { }
+
                             startNow = false;
+                        }
+                        if (audioPositionAtNext != 0)
+                        {
+                            try
+                            {
+                                MainTrack.SeekToSeconds(audioPositionAtNext);
+                            }
+                            catch { }
+
+                            audioPositionAtNext = 0;
                         }
                     }
                     catch (Exception e)
@@ -342,17 +508,20 @@ namespace zakoAudioPlayer
                 int mid = (int)(BufferSize[0] / 2);
                 int targetLength = (int)BufferSize[0] - 3;
                 string t1 = $" zakoAudioPlayer - {Page} ";
-                if (t1.Length % 2 == 1)
+                if (GetDisplayWidth(t1) % 2 == 1)
                 {
                     t1 = $"{t1} ";
                 }
-                if (targetLength > t1.Length - 1)
+                if (targetLength > GetDisplayWidth(t1) - 1)
                 {
-                    targetLength = t1.Length - 1;
+                    targetLength = GetDisplayWidth(t1) - 1;
                 }
                 t1 = $" zakoAudioPlayer - {Page} ".Substring(0, targetLength);
-                string t2 = new('=', mid - (t1.Length / 2));
-                string t3 = new('=', (int)(BufferSize[0] - t1.Length - t2.Length));
+                string t2 = new('=', mid - (GetDisplayWidth(t1) / 2));
+                string t3 = new(
+                    '=',
+                    (int)(BufferSize[0] - GetDisplayWidth(t1) - GetDisplayWidth(t2))
+                );
                 Console.WriteLine($"{t2}{t1}{t3}");
                 HomePageData.usedLine = 4;
                 Console.ResetColor();
@@ -415,18 +584,14 @@ namespace zakoAudioPlayer
         static Action HomePage = () =>
         {
             int mid = (int)(BufferSize[0] / 2);
-            string t_1 = $" {metaData[0]}  ";
-            if (t_1.Length % 2 == 1)
-            {
-                t_1 = $"{t_1} ";
-            }
+            string t_1 = $" {metaData[0]} ";
             int targetLength = (int)BufferSize[0] - 1;
-            if (targetLength >= t_1.Length)
+            if (targetLength >= GetDisplayWidth(t_1))
             {
-                targetLength = t_1.Length;
+                targetLength = GetDisplayWidth(t_1);
             }
-            t_1 = $"{t_1.Substring(0, targetLength - 1)}";
-            string t_2 = new(' ', mid - t_1.Length / 2);
+            t_1 = $"{TruncateToWidth(t_1, targetLength)}";
+            string t_2 = new(' ', mid - GetDisplayWidth(t_1) / 2);
             Console.ResetColor();
             Console.Write(t_2);
             Console.BackgroundColor = ConsoleColor.Magenta;
@@ -439,7 +604,7 @@ namespace zakoAudioPlayer
             int t3 = (int)((BufferSize[0] - 2) / 2);
             int t4 = (int)(BufferSize[0] - 2 * t3) - 1;
             string apart = new(' ', t4);
-            if (t1.Length > t3 || t2.Length > t3 || true)
+            if (GetDisplayWidth(t1) > t3 || GetDisplayWidth(t2) > t3 || true)
             {
                 Console.BackgroundColor = ConsoleColor.DarkBlue;
                 Console.Write(t1);
@@ -454,10 +619,10 @@ namespace zakoAudioPlayer
             }
             else
             {
-                Console.Write($"{t1}{new(' ', t3 - t1.Length)}");
+                Console.Write($"{t1}{new(' ', t3 - GetDisplayWidth(t1))}");
                 Console.ResetColor();
                 Console.Write(apart + ' ');
-                Console.Write($"{new(' ', t3 - t2.Length)}{t2}");
+                Console.Write($"{new(' ', t3 - GetDisplayWidth(t2))}{t2}");
                 Console.ResetColor();
                 Console.WriteLine();
                 HomePageData.usedLine++;
@@ -511,7 +676,13 @@ namespace zakoAudioPlayer
                             var rd = new Random();
                             index = rd.Next(0, music.Count);
                         }
-                        startNow = true;
+                        bool tmp1 = false;
+                        try
+                        {
+                            tmp1 = MainTrack.IsPlaying;
+                        }
+                        catch { }
+                        startNow = tmp1;
                         break;
                     case (ConsoleKey.DownArrow):
                         if (!activeConfig.random)
@@ -608,11 +779,11 @@ namespace zakoAudioPlayer
         {
             string t1 = "Speaker:";
             string t2 = activeConfig.speaker;
-            if (t2.Length > BufferSize[0] - t1.Length)
+            if (GetDisplayWidth(t2) > BufferSize[0] - GetDisplayWidth(t1))
             {
-                t2 = t2.Substring(0, (int)BufferSize[0] - t1.Length - 1);
+                t2 = t2.Substring(0, (int)BufferSize[0] - GetDisplayWidth(t1) - 1);
             }
-            int t3 = (int)((BufferSize[0] - t1.Length - t2.Length) / 2);
+            int t3 = (int)((BufferSize[0] - GetDisplayWidth(t1) - GetDisplayWidth(t2)) / 2);
             string t4 = new(' ', t3);
             Console.ResetColor();
             Console.Write(t4);
@@ -624,7 +795,7 @@ namespace zakoAudioPlayer
             Console.WriteLine('\n');
             string t5 =
                 $"[Volume:{new string(' ', 3 - ((int)(100 * activeConfig.volume)).ToString().Length)}{(int)(100 * activeConfig.volume)}%]";
-            int progressBarLength = (int)(BufferSize[0] - t5.Length);
+            int progressBarLength = (int)(BufferSize[0] - GetDisplayWidth(t5));
             int used = (int)(progressBarLength * activeConfig.volume);
             string t6 = $"{new('=', used)}|{new(' ', progressBarLength - used)}";
             Console.BackgroundColor = ConsoleColor.Green;
@@ -704,11 +875,11 @@ namespace zakoAudioPlayer
         {
             string t1 = "Speaker:";
             string t2 = activeConfig.speaker;
-            if (t2.Length > BufferSize[0] - t1.Length)
+            if (GetDisplayWidth(t2) > BufferSize[0] - GetDisplayWidth(t1))
             {
-                t2 = t2.Substring(0, (int)BufferSize[0] - t1.Length - 1);
+                t2 = TruncateToWidth(t2, (int)BufferSize[0] - GetDisplayWidth(t1) - 1);
             }
-            int t3 = (int)((BufferSize[0] - t1.Length - t2.Length) / 2);
+            int t3 = (int)((BufferSize[0] - GetDisplayWidth(t1) - GetDisplayWidth(t2)) / 2);
             string t4 = new(' ', t3);
             Console.ResetColor();
             Console.Write(t4);
@@ -732,8 +903,8 @@ namespace zakoAudioPlayer
                 else
                 {
                     string t11 = $"{hit + 1}.{SelectSpeakerPageData.DevNameList[hit]}";
-                    int t12 = (int)((Length - t11.Length) / 2);
-                    int t13 = (int)(Length - t11.Length - t12);
+                    int t12 = (int)((Length - GetDisplayWidth(t11)) / 2);
+                    int t13 = (int)(Length - GetDisplayWidth(t11) - t12);
                     Console.ResetColor();
                     Console.Write(new string(' ', t12));
                     if (hit == SelectSpeakerPageData.select)
@@ -803,7 +974,7 @@ namespace zakoAudioPlayer
         {
             int length = (int)BufferSize[0];
             string title = "Music List";
-            int height = (int)BufferSize[1] - HomePageData.usedLine - 2;
+            int height = (int)BufferSize[1] - HomePageData.usedLine - 3;
             int offset = (int)Math.Ceiling((double)height / 2);
             if (index - offset < 0)
             {
@@ -819,8 +990,8 @@ namespace zakoAudioPlayer
                  */
                 offset = index + height - md.Count;
             }
-            int t1 = (int)(length - title.Length) / 2;
-            int t2 = (int)length - title.Length - t1;
+            int t1 = (int)(length - GetDisplayWidth(title)) / 2;
+            int t2 = (int)length - GetDisplayWidth(title) - t1;
             string t3 = new('~', t1);
             string t4 = new('~', t2);
             Console.ResetColor();
@@ -830,7 +1001,7 @@ namespace zakoAudioPlayer
             Console.ResetColor();
             Console.Write(t4);
             Console.Write('\n');
-            int t20 = length - 5 - 3;
+            int t20 = length - 6 - 3;
             int t21 = t20 / 3;
             int t22 = t21;
             int t23 = t20 - t21 - t22;
@@ -838,7 +1009,7 @@ namespace zakoAudioPlayer
             string t42 = "artist";
             string t43 = "album";
             Console.WriteLine(
-                $"index {t41}{new('\t', (t21 - t41.Length) / 8)}{t42}{new('\t', (t22 - t42.Length) / 8)}{t43}"
+                $"index {PadRightToWidth(t41, t21)}{PadRightToWidth(t42, t22)}{PadRightToWidth(t43, t23)}"
             );
             HomePageData.usedLine++;
             int i = -offset;
@@ -855,30 +1026,20 @@ namespace zakoAudioPlayer
                 string[] target = md[hit];
                 string t11 = $"{new string(' ', 4 - ((hit + 1).ToString().Length))}{hit + 1}.";
 
-                string t31 = target[0];
-                string t32 = target[1];
-                string t33 = target[2];
-                if (t31.Length > t21)
-                {
-                    t31 = $"{t31.Substring(0, t21 - 3)}...";
-                }
-                if (t32.Length > t22)
-                {
-                    t32 = $"{t31.Substring(0, t22 - 3)}...";
-                }
-                if (t33.Length > t23)
-                {
-                    t33 = $"{t31.Substring(0, t23 - 3)}...";
-                }
+                string t31 = TruncateToWidth(target[0], t21);
+                string t32 = TruncateToWidth(target[1], t22);
+                string t33 = TruncateToWidth(target[2], t23);
                 Console.BackgroundColor = ConsoleColor.Black;
                 if (hit == index)
                 {
                     Console.BackgroundColor = ConsoleColor.DarkGreen;
                 }
                 Console.Write(t11);
-                Console.Write($" {t31} ");
-                Console.Write($"{new('\t', (t21 - t31.Length) / 8)}{t32} ");
-                Console.Write($"{new('\t', (t22 - t32.Length) / 8)}{t33} ");
+                string t100 = TruncateToWidth(
+                    $" {PadRightToWidth(t31, t21)} {PadRightToWidth(t32, t22)} {PadRightToWidth(t33, t23)} ",
+                    t20 + 5
+                );
+                Console.Write(t100.Substring(0, t100.Length - 1));
                 Console.ResetColor();
                 Console.Write('\n');
                 HomePageData.usedLine++;
@@ -937,13 +1098,13 @@ namespace zakoAudioPlayer
                     HomePageData.usedLine++;
                     continue;
                 }
-                if (tmp == 0 || i.Length + tmp + 2 <= length)
+                if (tmp == 0 || GetDisplayWidth(i) + tmp + 2 <= length)
                 {
                     Console.BackgroundColor = ConsoleColor.DarkGreen;
                     Console.Write($"{i} ");
                     Console.BackgroundColor = ConsoleColor.Black;
                     Console.Write(' ');
-                    tmp += i.Length + 2;
+                    tmp += GetDisplayWidth(i) + 2;
                 }
                 else
                 {
