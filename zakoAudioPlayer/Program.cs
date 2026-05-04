@@ -272,7 +272,7 @@ namespace zakoAudioPlayer
                 }
                 if (index < 0)
                 {
-                    index = music.Count;
+                    index = music.Count-1;
                 }
                 if (music.Count != 0)
                 {
@@ -439,14 +439,14 @@ namespace zakoAudioPlayer
             int t3 = (int)((BufferSize[0] - 2) / 2);
             int t4 = (int)(BufferSize[0] - 2 * t3) - 1;
             string apart = new(' ', t4);
-            if (t1.Length > t3 || t2.Length > t3)
+            if (t1.Length > t3 || t2.Length > t3 || true)
             {
-                Console.BackgroundColor = ConsoleColor.Blue;
+                Console.BackgroundColor = ConsoleColor.DarkBlue;
                 Console.Write(t1);
                 Console.ResetColor();
                 Console.Write('\n');
                 HomePageData.usedLine++;
-                Console.BackgroundColor = ConsoleColor.Blue;
+                Console.BackgroundColor = ConsoleColor.DarkBlue;
                 Console.Write(t2);
                 Console.ResetColor();
                 Console.Write('\n');
@@ -803,7 +803,7 @@ namespace zakoAudioPlayer
         {
             int length = (int)BufferSize[0];
             string title = "Music List";
-            int height = (int)BufferSize[1] - HomePageData.usedLine - 1;
+            int height = (int)BufferSize[1] - HomePageData.usedLine - 2;
             int offset = (int)Math.Ceiling((double)height / 2);
             if (index - offset < 0)
             {
@@ -817,7 +817,7 @@ namespace zakoAudioPlayer
                  *index-md.Count+height>offset
                  *offset+index+height-1<md.Count
                  */
-                offset = index+height-md.Count;
+                offset = index + height - md.Count;
             }
             int t1 = (int)(length - title.Length) / 2;
             int t2 = (int)length - title.Length - t1;
@@ -830,6 +830,16 @@ namespace zakoAudioPlayer
             Console.ResetColor();
             Console.Write(t4);
             Console.Write('\n');
+            int t20 = length - 5 - 3;
+            int t21 = t20 / 3;
+            int t22 = t21;
+            int t23 = t20 - t21 - t22;
+            string t41 = "song";
+            string t42 = "artist";
+            string t43 = "album";
+            Console.WriteLine(
+                $"index {t41}{new('\t', (t21 - t41.Length) / 8)}{t42}{new('\t', (t22 - t42.Length) / 8)}{t43}"
+            );
             HomePageData.usedLine++;
             int i = -offset;
             for (int j = 0; j < height; j++)
@@ -844,10 +854,7 @@ namespace zakoAudioPlayer
                 }
                 string[] target = md[hit];
                 string t11 = $"{new string(' ', 4 - ((hit + 1).ToString().Length))}{hit + 1}.";
-                int t20 = length - t11.Length - 3;
-                int t21 = t20 / 3;
-                int t22 = t21;
-                int t23 = t20 - t21 - t22;
+
                 string t31 = target[0];
                 string t32 = target[1];
                 string t33 = target[2];
@@ -869,9 +876,9 @@ namespace zakoAudioPlayer
                     Console.BackgroundColor = ConsoleColor.DarkGreen;
                 }
                 Console.Write(t11);
-                Console.Write($"{new string(' ', t21 - t31.Length)}{t31} ");
-                Console.Write($"{new string(' ', t22 - t32.Length)}{t32} ");
-                Console.Write($"{new string(' ', t23 - t33.Length)}{t33} ");
+                Console.Write($" {t31} ");
+                Console.Write($"{new('\t', (t21 - t31.Length) / 8)}{t32} ");
+                Console.Write($"{new('\t', (t22 - t32.Length) / 8)}{t33} ");
                 Console.ResetColor();
                 Console.Write('\n');
                 HomePageData.usedLine++;
