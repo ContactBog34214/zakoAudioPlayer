@@ -38,15 +38,13 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Publish self-contained executable
+      - name: Publish self-contained (no single-file)
         run: |
           dotnet publish \
             --configuration Release \
             --runtime ${{ matrix.rid }} \
             --self-contained true \
             --output ./publish \
-            -p:PublishSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
             -p:DebugType=none \
             -p:DebugSymbols=false
 
@@ -69,33 +67,3 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ runner.temp }}/${{ matrix.artifact_name }}.${{ matrix.compress_ext }}
-          if-no-files-found: error
-
-  release:
-    name: Create Release and Upload Assets
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
-
-      - name: Display structure of downloaded files
-        run: ls -R ./artifacts
-
-      - name: Create Release and upload assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: continuous-${{ github.run_number }}
-          name: "Continuous Build #${{ github.run_number }}"
-          body: |
-            🚀 自动构建于 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          draft: false
-          prerelease: true
-          # 上传所有 zip 文件（Windows）和 tar.gz 文件（Linux/macOS）
-          files: |
-            ./artifacts/**/*.zip
-            ./artifacts/**/*.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
