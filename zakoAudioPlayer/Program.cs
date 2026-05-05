@@ -2,18 +2,19 @@
 using System.Diagnostics;
 using System.Formats.Tar;
 using System.Numerics;
-using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Line.Framework.Audio;
 using ManagedBass;
 using TagLib.Flac;
+using zakoAudioPlayer.Plugin;
 
 #nullable enable
 
 namespace zakoAudioPlayer
 {
-    class Program
+    public class Program
     {
         /// <summary>
         /// 判断字符是否为全角（常用 CJK 及韩文、日文范围）
@@ -91,23 +92,29 @@ namespace zakoAudioPlayer
 
         static Config? activeConfig = new();
         static Exception ZakoZako = new Exception();
-        static Thread configUpdateThread;
-        static Thread mainUpdateThread = new Thread(() => UpdateThread());
-        static Thread mainPrintThread = new Thread(() => PrintThread());
-        static Thread mainMusicManagerThread = new Thread(() => MusicManagerThread());
-        static Thread mainKeyListenerThread = new Thread(() => KeyListener());
-        static string? Playing;
-        static int MaximumWidth = 400;
-        static string Page = "Home";
-        static List<string> music = ["No Playing"];
-        static AudioManager audio = new AudioManager();
-        static int index = 0;
-        static string[] metaData = ["Title", "artist", "collection"];
-        static double fullTime = 0;
-        static List<string[]> md = [];
-        static Track? MainTrack;
+        public static Thread configUpdateThread;
+        public static Thread mainUpdateThread = new Thread(() =>
+            Do("zakoAudioPlayer.Thread.Update")
+        );
+        public static Thread mainPrintThread = new Thread(() => Do("zakoAudioPlayer.Thread.Print"));
+        public static Thread mainMusicManagerThread = new Thread(() =>
+            Do("zakoAudioPlayer.Thread.MusicManager")
+        );
+        public static Thread mainKeyListenerThread = new Thread(() =>
+            Do("zakoAudioPlayer.KeyListener")
+        );
+        public static string? Playing;
+        public static int MaximumWidth = 400;
+        public static string Page = "Home";
+        public static List<string> music = ["No Playing"];
+        public static AudioManager audio = new AudioManager();
+        public static int index = 0;
+        public static string[] metaData = ["Title", "artist", "collection"];
+        public static double fullTime = 0;
+        public static List<string[]> md = [];
+        public static Track? MainTrack;
 
-        static double audioPositionAtNext = 0;
+        public static double audioPositionAtNext = 0;
 
         public static T DeepCopy<T>(T obj)
         {
@@ -115,7 +122,7 @@ namespace zakoAudioPlayer
             return JsonSerializer.Deserialize<T>(json);
         }
 
-        static void UpdateFileNow(string path)
+        public static Action<string> UpdateFileNow = (string path) =>
         {
             if (activeConfig.saveAudioProgress)
             {
@@ -130,9 +137,9 @@ namespace zakoAudioPlayer
                 activeConfig.Progress = 0;
             }
             System.IO.File.WriteAllText(path, JsonSerializer.Serialize(activeConfig));
-        }
+        };
 
-        static void UpdateFile(string path)
+        public static Action<string> UpdateFile = (string path) =>
         {
             Config? lastConfig = DeepCopy<Config?>(activeConfig);
             while (true)
@@ -144,9 +151,9 @@ namespace zakoAudioPlayer
                     UpdateFileNow(path);
                 }
             }
-        }
+        };
 
-        static void LoadFile(string path)
+        public static Action<string> LoadFile = (string path) =>
         {
             if (path != null)
             {
@@ -183,9 +190,9 @@ namespace zakoAudioPlayer
                 music = ["No Playing"];
                 activeConfig.targetFile = "";
             }
-        }
+        };
 
-        static void LoadMusic()
+        public static Action LoadMusic = () =>
         {
             try
             {
@@ -199,9 +206,9 @@ namespace zakoAudioPlayer
                 md = tmp;
             }
             catch { }
-        }
+        };
 
-        static class packageInfo
+        public static class packageInfo
         {
             public static readonly Version version = new("2026.2.1");
             public static readonly string description =
@@ -210,9 +217,9 @@ namespace zakoAudioPlayer
             ";
         }
 
-        static List<string> AudioList = new();
+        public static List<string> AudioList = new();
 
-        class Config
+        public class Config
         {
             public string targetFile { get; set; } = "";
             public string speaker { get; set; } = "";
@@ -231,7 +238,7 @@ namespace zakoAudioPlayer
 
         static string targetConfigPath = "";
 
-        static void LoadConfig(string file)
+        public static Action<string> LoadConfig = (string file) =>
         {
             try
             {
@@ -269,10 +276,13 @@ namespace zakoAudioPlayer
                 }
                 UpdateFileNow(file);
             }
-        }
+        };
 
         static void Main(string[] arg)
         {
+            LoadDefaultAction();
+            LoadPlugin();
+            Console.WriteLine(String.Join(',', plugin.GetLoadedPluginIds()));
             string loadArg = null;
             if (arg.Length != 0)
             {
@@ -280,7 +290,7 @@ namespace zakoAudioPlayer
                 {
                     case ("-h"):
                     case ("--help"):
-                        Help();
+                        Do("zakoAudioPlayer.Help");
                         return;
                     case ("-v"):
                     case ("--version"):
@@ -311,7 +321,7 @@ namespace zakoAudioPlayer
             if (!Directory.Exists(path))
                 Directory.CreateDirectory(path);
             targetConfigPath = $"{path}/config.json";
-            LoadConfig(targetConfigPath);
+            Do("zakoAudioPlayer.LoadConfig", targetConfigPath);
             if (activeConfig.saveAudioProgress && loadArg == null)
             {
                 audioPositionAtNext = activeConfig.Progress;
@@ -325,16 +335,18 @@ namespace zakoAudioPlayer
             {
                 activeConfig.volume = 0;
             }
-            configUpdateThread = new Thread(() => UpdateFile($"{path}/config.json"));
+            configUpdateThread = new Thread(() =>
+                Do("zakoAudioPlayer.UpdateFile", $"{path}/config.json")
+            );
             if (loadArg == null)
             {
-                LoadFile(activeConfig.targetFile);
+                Do("zakoAudioPlayer.LoadFile", activeConfig.targetFile);
             }
             else
             {
-                LoadFile(loadArg);
+                Do("zakoAudioPlayer.LoadFile", loadArg);
             }
-            LoadMusic();
+            Do("zakoAudioPlayer.Thread.LoadMusic");
             configUpdateThread.Start();
             mainPrintThread.Start();
             mainMusicManagerThread.Start();
@@ -351,7 +363,7 @@ namespace zakoAudioPlayer
             }
         }
 
-        private static void HandlePosixSignal(PosixSignalContext context)
+        public static Action<PosixSignalContext> HandlePosixSignal = (PosixSignalContext context) =>
         {
             context.Cancel = true; // 避免进程被立即终止
             try
@@ -364,17 +376,17 @@ namespace zakoAudioPlayer
                 UpdateFileNow(targetConfigPath);
             }
             catch { }
-        }
+        };
 
-        static void Help()
+        public static Action Help = () =>
         {
             Console.WriteLine("usage: zaplayer [file]");
             Console.WriteLine("operations:");
             Console.WriteLine("      zaplayer {-h --help}");
             Console.WriteLine("      zaplayer {-v --version}");
-        }
+        };
 
-        static void UpdateThread()
+        public static Action UpdateThread = () =>
         {
             string? lastSpeaker = "i don't know";
             string? lastPlaying = "";
@@ -482,11 +494,11 @@ namespace zakoAudioPlayer
                 catch (Exception) { }
                 Thread.Sleep(50);
             }
-        }
+        };
 
-        static Vector2 BufferSize = new(Console.BufferWidth, Console.BufferHeight);
+        public static Vector2 BufferSize = new(Console.BufferWidth, Console.BufferHeight);
 
-        static void PrintThread()
+        public static Action PrintThread = () =>
         {
             Console.CursorVisible = false;
             while (true)
@@ -523,7 +535,7 @@ namespace zakoAudioPlayer
                 Console.ResetColor();
                 if (BufferSize[0] > 20)
                 {
-                    var s = Task.Run(() => renderPage());
+                    var s = Task.Run(() => Do("zakoAudioPlayer.Thread.renderPage"));
                     var sw = new Stopwatch();
                     sw.Start();
                     while (true)
@@ -544,25 +556,14 @@ namespace zakoAudioPlayer
                 }
                 Thread.Sleep(10);
             }
-        }
+        };
 
-        static void renderPage()
+        public static Action renderPage = () =>
         {
-            switch (Page)
-            {
-                case "Home":
-                    HomePage();
-                    break;
-                case "Volume":
-                    VolumePage();
-                    break;
-                case "SelectSpeaker":
-                    SelectSpeakerPage();
-                    break;
-            }
-        }
+            Do($"zakoAudioPlayer.Pages.{Page}Page");
+        };
 
-        static string FormatNumber(int number, int target)
+        public static string FormatNumber(int number, int target)
         {
             if (number.ToString().Length >= target)
                 return number.ToString();
@@ -571,13 +572,13 @@ namespace zakoAudioPlayer
             return result;
         }
 
-        static class HomePageData
+        public static class HomePageData
         {
             public static ConsoleKey keyPress = ConsoleKey.VolumeMute;
             public static int usedLine = 0;
         }
 
-        static Action HomePage = () =>
+        public static Action HomePage = () =>
         {
             int mid = (int)(BufferSize[0] / 2);
             string t_1 = $" {metaData[0]} ";
@@ -624,27 +625,35 @@ namespace zakoAudioPlayer
                 HomePageData.usedLine++;
             }
             Console.ResetColor();
-            playingBar();
+            Do("zakoAudioPlayer.Pages.HomePage.playingBar");
             bool s = false;
             try
             {
                 s = MainTrack.IsPlaying;
             }
             catch { }
-            actionBar([
-                "[UpArrow]last music",
-                $"[Space]{(s ? "Pause" : "Play")}",
-                "[DownArrow]next music",
-                "\n",
-                "[LeftArrow]Rewind 10 sec",
-                "[RightArrow]Forward 10 sec",
-                "[F5]Speaker/Volume",
-                $"[F6]Loop Mode[{(activeConfig.playMode != 1 ? "Enabled" : "Disabled")}]",
-                $"[F7]Random Mode[{(activeConfig.random ? "Enabled" : "Disabled")}]",
-            ]);
-            DrawMusicList();
+            Do(
+                "zakoAudioPlayer.actionBar",
+                new List<string>
+                {
+                    "[UpArrow]last music",
+                    $"[Space]{(s ? "Pause" : "Play")}",
+                    "[DownArrow]next music",
+                    "\n",
+                    "[LeftArrow]Rewind 10 sec",
+                    "[RightArrow]Forward 10 sec",
+                    "[F5]Speaker/Volume",
+                    $"[F6]Loop Mode[{(activeConfig.playMode != 1 ? "Enabled" : "Disabled")}]",
+                    $"[F7]Random Mode[{(activeConfig.random ? "Enabled" : "Disabled")}]",
+                }
+            );
+            Do("zakoAudioPlayer.Pages.HomePage.MusicList");
             if (key != HomePageData.keyPress)
             {
+                if ((ConsoleKey?)key == null)
+                {
+                    return;
+                }
                 HomePageData.keyPress = (ConsoleKey)key;
                 switch (key)
                 {
@@ -736,7 +745,7 @@ namespace zakoAudioPlayer
             }
         };
 
-        static void MusicManagerThread()
+        public static Action MusicManagerThread = () =>
         {
             while (true)
             {
@@ -762,16 +771,16 @@ namespace zakoAudioPlayer
                 catch { }
                 Thread.Sleep(50);
             }
-        }
+        };
 
-        static bool startNow = false;
+        public static bool startNow = false;
 
-        static class VolumePageData
+        public static class VolumePageData
         {
             public static ConsoleKey KeyPress = ConsoleKey.VolumeMute;
         }
 
-        static Action VolumePage = () =>
+        public static Action VolumePage = () =>
         {
             string t1 = "Speaker:";
             string t2 = activeConfig.speaker;
@@ -799,14 +808,18 @@ namespace zakoAudioPlayer
             Console.ResetColor();
             Console.Write(t6);
             Console.Write('\n');
-            actionBar([
-                "[ESC]Back",
-                "[LeftArrow]Reduce Volume",
-                "[RightArrow]Add Volume",
-                "[DownArrow]Reduce Volume(*10)",
-                "[UpArrow]Add Volume(*10)",
-                "[S]Choose a speaker",
-            ]);
+            Do(
+                "zakoAudioPlayer.actionBar",
+                new List<string>
+                {
+                    "[ESC]Back",
+                    "[LeftArrow]Reduce Volume",
+                    "[RightArrow]Add Volume",
+                    "[DownArrow]Reduce Volume(*10)",
+                    "[UpArrow]Add Volume(*10)",
+                    "[S]Choose a speaker",
+                }
+            );
             if (VolumePageData.KeyPress != key)
             {
                 VolumePageData.KeyPress = (ConsoleKey)key;
@@ -843,7 +856,7 @@ namespace zakoAudioPlayer
             }
         };
 
-        static class SelectSpeakerPageData
+        public static class SelectSpeakerPageData
         {
             public static ConsoleKey KeyPress = ConsoleKey.VolumeMute;
             public static int Line = 5;
@@ -867,7 +880,7 @@ namespace zakoAudioPlayer
             }
         }
 
-        static Action SelectSpeakerPage = () =>
+        public static Action SelectSpeakerPage = () =>
         {
             string t1 = "Speaker:";
             string t2 = activeConfig.speaker;
@@ -921,13 +934,17 @@ namespace zakoAudioPlayer
                     Console.Write('\n');
                 }
             }
-            actionBar([
-                "[ESC]Back",
-                "[UpArrow]Up",
-                "[DownArrow]Down",
-                "[Space]Select",
-                "[R]Reload",
-            ]);
+            Do(
+                "zakoAudioPlayer.actionBar",
+                new List<string>
+                {
+                    "[ESC]Back",
+                    "[UpArrow]Up",
+                    "[DownArrow]Down",
+                    "[Space]Select",
+                    "[R]Reload",
+                }
+            );
             if (SelectSpeakerPageData.KeyPress != (ConsoleKey)key)
             {
                 SelectSpeakerPageData.KeyPress = (ConsoleKey)key;
@@ -966,11 +983,15 @@ namespace zakoAudioPlayer
                 SelectSpeakerPageData.select = SelectSpeakerPageData.DevNameList.Count - 1;
             }
         };
-        static Action DrawMusicList = () =>
+        public static Action DrawMusicList = () =>
         {
+            if (0 == md.Count)
+            {
+                Do("zakoAudioPlayer.Thread.LoadMusic");
+            }
             int length = (int)BufferSize[0];
             string title = "Music List";
-            int height = (int)BufferSize[1] - HomePageData.usedLine - 0;
+            int height = (int)BufferSize[1] - HomePageData.usedLine - 1;
             int offset = (int)Math.Ceiling((double)height / 2);
             if (index - offset < 0)
             {
@@ -1041,7 +1062,7 @@ namespace zakoAudioPlayer
                 HomePageData.usedLine++;
             }
         };
-        static Action playingBar = () =>
+        public static Action playingBar = () =>
         {
             double now = 0;
             try
@@ -1081,7 +1102,7 @@ namespace zakoAudioPlayer
                 HomePageData.usedLine++;
             }
         };
-        static Action<List<string>> actionBar = (List<string> arg) =>
+        public static Action<List<string>> actionBar = (List<string> arg) =>
         {
             int tmp = 0;
             int length = (int)BufferSize[0] + 1;
@@ -1119,15 +1140,97 @@ namespace zakoAudioPlayer
             Console.Write('\n');
             HomePageData.usedLine++;
         };
-        static ConsoleKey? key = null;
-
-        static void KeyListener()
+        public static ConsoleKey? key = null;
+        public static PluginManager plugin = new() { ManagerVersion = 1 };
+        public static Action KeyListener = () =>
         {
             while (true)
             {
                 key = Console.ReadKey().Key;
                 Thread.Sleep(20);
                 key = ConsoleKey.Applications;
+            }
+        };
+
+        static void LoadPlugin()
+        {
+            string pluginBaseDir = Path.Combine(AppContext.BaseDirectory, "Plugins");
+            try
+            {
+                Directory.CreateDirectory(pluginBaseDir);
+            }
+            catch { }
+
+            // 扫描每个子文件夹，查找与文件夹同名的 .dll（也可自定义规则）
+            foreach (var pluginDir in Directory.GetDirectories(pluginBaseDir))
+            {
+                string dirName = Path.GetFileName(pluginDir);
+                string dllFile = Path.Combine(pluginDir, $"{dirName}.dll");
+                if (System.IO.File.Exists(dllFile))
+                {
+                    plugin.LoadPlugin(dllFile, (PluginBase p) => PluginHook(p));
+                }
+            }
+        }
+
+        public static Dictionary<string, Delegate> Actions { get; set; } = new();
+
+        static void LoadDefaultAction()
+        {
+            Actions.Add("zakoAudioPlayer.Pages.HomePage", HomePage);
+            Actions.Add("zakoAudioPlayer.Pages.VolumePage", VolumePage);
+            Actions.Add("zakoAudioPlayer.Pages.SelectSpeakerPage", SelectSpeakerPage);
+            Actions.Add("zakoAudioPlayer.Thread.renderPage", renderPage);
+            Actions.Add("zakoAudioPlayer.Pages.HomePage.playingBar", playingBar);
+            Actions.Add("zakoAudioPlayer.actionBar", actionBar);
+            Actions.Add("zakoAudioPlayer.KeyListener", KeyListener);
+            Actions.Add("zakoAudioPlayer.Pages.HomePage.MusicList", DrawMusicList);
+            Actions.Add("zakoAudioPlayer.Thread.Update", UpdateThread);
+            Actions.Add("zakoAudioPlayer.Help", Help);
+            Actions.Add("zakoAudioPlayer.LoadFile", LoadFile);
+            Actions.Add("zakoAudioPlayer.LoadConfig", LoadConfig);
+            Actions.Add("zakoAudioPlayer.UpdateFile", UpdateFile);
+            Actions.Add("zakoAudioPlayer.UpdateFileNow", UpdateFileNow);
+            Actions.Add("zakoAudioPlayer.Thread.Print", PrintThread);
+            Actions.Add("zakoAudioPlayer.Thread.MusicManager", MusicManagerThread);
+            Actions.Add("zakoAudioPlayer.Thread.LoadMusic", LoadMusic);
+        }
+
+        static void PluginHook(PluginBase p)
+        {
+            foreach (var m in p.Mixin)
+            {
+                try
+                {
+                    Actions.Remove(m.Key);
+                }
+                catch { }
+                Actions.Add(m.Key, m.Value);
+            }
+        }
+
+        static void Do(string func, params object[] args)
+        {
+            if (Actions.TryGetValue(func, out var del))
+            {
+                try
+                {
+                    del.DynamicInvoke(args);
+                }
+                catch (TargetInvocationException ex)
+                {
+                    Console.WriteLine($"调用 {func} 失败，内部异常: {ex.InnerException?.Message}");
+                    Console.WriteLine($"堆栈: {ex.InnerException?.StackTrace}");
+                    // 根据需要可重新抛出
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"调用 {func} 发生其他异常: {ex.Message}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"功能 {func} 未注册");
             }
         }
     }
