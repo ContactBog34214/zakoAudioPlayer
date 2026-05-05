@@ -16,6 +16,26 @@ namespace zakoAudioPlayer
     class Program
     {
         /// <summary>
+        /// 判断字符是否为全角（常用 CJK 及韩文、日文范围）
+        /// </summary>
+        static bool IsFullWidth(char c)
+        {
+            return (c >= 0x1100 && c <= 0x11FF)
+                || // 韩文辅音/元音
+                (c >= 0x3130 && c <= 0x318F)
+                || // 韩文兼容字母
+                (c >= 0xAC00 && c <= 0xD7AF)
+                || // 韩文音节
+                (c >= 0x4E00 && c <= 0x9FFF)
+                || // CJK 统一表意文字
+                (c >= 0x3040 && c <= 0x30FF)
+                || // 日文平假名/片假名
+                (c >= 0xFF00 && c <= 0xFFEF)
+                || // 全角 ASCII
+                (c >= 0x3000 && c <= 0x303F); // CJK 标点符号
+        }
+
+        /// <summary>
         /// 获取字符串的显示宽度（全角2，半角1）
         /// </summary>
         static int GetDisplayWidth(string text)
@@ -24,36 +44,12 @@ namespace zakoAudioPlayer
                 return 0;
             int width = 0;
             foreach (char c in text)
-            {
-                if (IsFullWidth(c))
-                    width += 2;
-                else
-                    width += 1;
-            }
+                width += IsFullWidth(c) ? 2 : 1;
             return width;
         }
 
         /// <summary>
-        /// 判断字符是否为全角（常用 CJK 范围）
-        /// </summary>
-        static bool IsFullWidth(char c)
-        {
-            return (c >= 0x4E00 && c <= 0x9FFF)
-                || (c >= 0x3040 && c <= 0x30FF)
-                || (c >= 0x3400 && c <= 0x4DBF)
-                || (c >= 0x20000 && c <= 0x2A6DF)
-                || (c >= 0xFF00 && c <= 0xFFEF)
-                || (c >= 0x2E80 && c <= 0x2EFF)
-                || (c >= 0x3000 && c <= 0x303F)
-                || (c >= 0x31C0 && c <= 0x31EF)
-                || (c >= 0x3200 && c <= 0x32FF)
-                || (c >= 0x3300 && c <= 0x33FF)
-                || (c >= 0xF900 && c <= 0xFAFF)
-                || (c >= 0xFE30 && c <= 0xFE4F);
-        }
-
-        /// <summary>
-        /// 按显示宽度右侧填充空格
+        /// 按显示宽度右侧填充空格，确保总显示宽度达到 targetWidth
         /// </summary>
         static string PadRightToWidth(string text, int targetWidth)
         {
@@ -64,7 +60,7 @@ namespace zakoAudioPlayer
         }
 
         /// <summary>
-        /// 按显示宽度截断文本，末尾加省略号
+        /// 按显示宽度截断字符串，若超长则末尾加省略号（省略号占1个宽度）
         /// </summary>
         static string TruncateToWidth(string text, int maxWidth)
         {
@@ -79,11 +75,11 @@ namespace zakoAudioPlayer
                 int charWidth = IsFullWidth(text[i]) ? 2 : 1;
                 if (width + charWidth > maxWidth)
                 {
-                    // 保留前面的字符，后面加省略号（省略号占1个宽度）
-                    if (i < 1)
+                    // 需要截断，如果连一个字符都放不下，返回省略号
+                    if (i == 0)
                         return "…";
-                    string truncated = text.Substring(0, i - 1);
-                    // 确保加上省略号后不超过 maxWidth
+                    string truncated = text.Substring(0, i);
+                    // 确保加省略号后不超出 maxWidth
                     while (GetDisplayWidth(truncated) + 1 > maxWidth && truncated.Length > 0)
                         truncated = truncated.Substring(0, truncated.Length - 1);
                     return truncated + "…";
@@ -207,7 +203,7 @@ namespace zakoAudioPlayer
 
         static class packageInfo
         {
-            public static readonly Version version = new("2026.2.0");
+            public static readonly Version version = new("2026.2.1");
             public static readonly string description =
                 @"It's just a media player
                 a light,fast media player
@@ -974,7 +970,7 @@ namespace zakoAudioPlayer
         {
             int length = (int)BufferSize[0];
             string title = "Music List";
-            int height = (int)BufferSize[1] - HomePageData.usedLine - 3;
+            int height = (int)BufferSize[1] - HomePageData.usedLine - 0;
             int offset = (int)Math.Ceiling((double)height / 2);
             if (index - offset < 0)
             {
@@ -996,7 +992,7 @@ namespace zakoAudioPlayer
             string t4 = new('~', t2);
             Console.ResetColor();
             Console.Write(t3);
-            Console.BackgroundColor = ConsoleColor.Yellow;
+            Console.BackgroundColor = ConsoleColor.DarkYellow;
             Console.Write(title);
             Console.ResetColor();
             Console.Write(t4);
@@ -1032,7 +1028,7 @@ namespace zakoAudioPlayer
                 Console.BackgroundColor = ConsoleColor.Black;
                 if (hit == index)
                 {
-                    Console.BackgroundColor = ConsoleColor.DarkGreen;
+                    Console.BackgroundColor = ConsoleColor.DarkGray;
                 }
                 Console.Write(t11);
                 string t100 = TruncateToWidth(
@@ -1100,7 +1096,7 @@ namespace zakoAudioPlayer
                 }
                 if (tmp == 0 || GetDisplayWidth(i) + tmp + 2 <= length)
                 {
-                    Console.BackgroundColor = ConsoleColor.DarkGreen;
+                    Console.BackgroundColor = ConsoleColor.DarkCyan;
                     Console.Write($"{i} ");
                     Console.BackgroundColor = ConsoleColor.Black;
                     Console.Write(' ');
@@ -1113,7 +1109,7 @@ namespace zakoAudioPlayer
                     Console.ResetColor();
                     Console.Write('\n');
                     HomePageData.usedLine++;
-                    Console.BackgroundColor = ConsoleColor.DarkGreen;
+                    Console.BackgroundColor = ConsoleColor.DarkCyan;
                     Console.Write(i);
                     Console.BackgroundColor = ConsoleColor.Black;
                     Console.Write(' ');
